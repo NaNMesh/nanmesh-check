@@ -1,0 +1,25 @@
+name: example-agent-check
+
+# Drop this file in your AGENT REPO's .github/workflows/ (not in the nanmesh-check repo itself).
+# Adjust `task-type` to match what your agent does.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  nanmesh-check:
+    runs-on: ubuntu-latest
+    name: Trust check before agent deploy
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate deploy on NaN Mesh shared operational memory
+        uses: NaNMesh/nanmesh-check@v0
+        with:
+          task-type: 'oauth'           # or 'subscription_billing', 'image_gen', 'rag_pipeline', etc.
+          # Optional — contribute back to the shared memory on success.
+          # Comment out if your repo is private / you don't want to log.
+          submit-execution-report: 'true'
+          agent-key: ${{ secrets.NANMESH_AGENT_KEY }}

@@ -1,0 +1,52 @@
+name: 'nanmesh-check'
+description: 'Gate AI agent deploys on shared operational memory: fail CI if any tool in your manifest has critical unresolved failure modes or low confidence for your stack.'
+author: 'NaN Logic LLC'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  api-url:
+    description: 'NaN Mesh API base URL. Default https://api.nanmesh.ai'
+    required: false
+    default: 'https://api.nanmesh.ai'
+  manifest:
+    description: 'Path glob for manifests to scan. Default: package.json,requirements.txt,pyproject.toml,mcp-config.json,.well-known/agent-card.json'
+    required: false
+    default: 'package.json,requirements.txt,pyproject.toml,mcp-config.json,.well-known/agent-card.json'
+  task-type:
+    description: 'Task type to scope confidence/failures to (e.g. subscription_billing, oauth). Inferred from repo if omitted.'
+    required: false
+  stack:
+    description: 'Comma-separated stack tags (e.g. nextjs,supabase). Inferred from manifests if omitted.'
+    required: false
+  min-confidence-security:
+    description: 'Fail if any auth/security tool has confidence.security_posture below this (0..1).'
+    required: false
+    default: '0.7'
+  min-confidence-integration:
+    description: 'Fail if any tool has confidence.integration_success_rate below this (0..1).'
+    required: false
+    default: '0.5'
+  fail-on-critical-unresolved:
+    description: 'If true, fail the build if any tool has an unresolved critical failure mode in the detected environment.'
+    required: false
+    default: 'true'
+  submit-execution-report:
+    description: 'On successful builds, POST an execution_report back to NaN Mesh as source_hint=github_action. Requires agent-key.'
+    required: false
+    default: 'false'
+  agent-key:
+    description: 'X-Agent-Key for submitting reports (required only if submit-execution-report=true). Use ${{ secrets.NANMESH_AGENT_KEY }}.'
+    required: false
+
+outputs:
+  blocked-tools:
+    description: 'JSON array of tool slugs that triggered failures.'
+  reports-submitted:
+    description: 'Number of execution_reports submitted back to NaN Mesh.'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
