@@ -1,5 +1,5 @@
 name: 'nanmesh-check'
-description: 'Gate AI agent deploys on shared operational memory: fail CI if any tool in your manifest has critical unresolved failure modes or low confidence for your stack.'
+description: 'Fail CI if any tool in your AI agent stack has critical unresolved failure modes or low confidence scores.'
 author: 'NaN Logic LLC'
 
 branding:
