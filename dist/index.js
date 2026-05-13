@@ -25660,6 +25660,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:events"
 
 /***/ }),
 
+/***/ 1455:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs/promises");
+
+/***/ }),
+
 /***/ 7075:
 /***/ ((module) => {
 
@@ -27418,6 +27425,64 @@ module.exports = parseParams
 /******/ }
 /******/ 
 /************************************************************************/
+/******/ /* webpack/runtime/create fake namespace object */
+/******/ (() => {
+/******/ 	var getProto = Object.getPrototypeOf ? (obj) => (Object.getPrototypeOf(obj)) : (obj) => (obj.__proto__);
+/******/ 	var leafPrototypes;
+/******/ 	// create a fake namespace object
+/******/ 	// mode & 1: value is a module id, require it
+/******/ 	// mode & 2: merge all properties of value into the ns
+/******/ 	// mode & 4: return value when already ns object
+/******/ 	// mode & 16: return value when it's Promise-like
+/******/ 	// mode & 8|1: behave like require
+/******/ 	__nccwpck_require__.t = function(value, mode) {
+/******/ 		if(mode & 1) value = this(value);
+/******/ 		if(mode & 8) return value;
+/******/ 		if(typeof value === 'object' && value) {
+/******/ 			if((mode & 4) && value.__esModule) return value;
+/******/ 			if((mode & 16) && typeof value.then === 'function') return value;
+/******/ 		}
+/******/ 		var ns = Object.create(null);
+/******/ 		__nccwpck_require__.r(ns);
+/******/ 		var def = {};
+/******/ 		leafPrototypes = leafPrototypes || [null, getProto({}), getProto([]), getProto(getProto)];
+/******/ 		for(var current = mode & 2 && value; typeof current == 'object' && !~leafPrototypes.indexOf(current); current = getProto(current)) {
+/******/ 			Object.getOwnPropertyNames(current).forEach((key) => (def[key] = () => (value[key])));
+/******/ 		}
+/******/ 		def['default'] = () => (value);
+/******/ 		__nccwpck_require__.d(ns, def);
+/******/ 		return ns;
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/define property getters */
+/******/ (() => {
+/******/ 	// define getter functions for harmony exports
+/******/ 	__nccwpck_require__.d = (exports, definition) => {
+/******/ 		for(var key in definition) {
+/******/ 			if(__nccwpck_require__.o(definition, key) && !__nccwpck_require__.o(exports, key)) {
+/******/ 				Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 			}
+/******/ 		}
+/******/ 	};
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/hasOwnProperty shorthand */
+/******/ (() => {
+/******/ 	__nccwpck_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ })();
+/******/ 
+/******/ /* webpack/runtime/make namespace object */
+/******/ (() => {
+/******/ 	// define __esModule on exports
+/******/ 	__nccwpck_require__.r = (exports) => {
+/******/ 		if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 			Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 		}
+/******/ 		Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 	};
+/******/ })();
+/******/ 
 /******/ /* webpack/runtime/compat */
 /******/ 
 /******/ if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = new URL('.', import.meta.url).pathname.slice(import.meta.url.match(/^file:\/\/\/\w:/) ? 1 : 0, -1) + "/";
@@ -27608,6 +27673,8 @@ async function run() {
         const stackArr = Array.from(stack);
         const blockers = [];
         const reasons = [];
+        const findings = {};
+        let toolsWithData = 0;
         for (const raw of tools) {
             const slug = toSlug(raw);
             if (!slug)
@@ -27615,8 +27682,22 @@ async function run() {
             const payload = await fetchAgentPayload(apiUrl, slug, taskTypeInput, stackArr);
             if (!payload)
                 continue;
+            toolsWithData++;
             const conf = payload.confidence_decomposition;
             const isSecurity = SECURITY_LIKE.has(slug);
+            const unresolvedFailures = (payload.known_failure_modes || []).filter(f => !f.resolved);
+            // Always collect findings for informational logging — even when not blocking.
+            findings[slug] = {
+                failures: unresolvedFailures.map(f => ({
+                    slug,
+                    severity: f.severity,
+                    failure_type: f.failure_type,
+                    resolved: f.resolved,
+                })),
+                reports_count: payload.network_evidence?.total_reports ?? 0,
+                conf: conf ?? null,
+            };
+            // Blocking checks
             if (isSecurity && conf && conf.security_posture !== null && conf.security_posture < minSecurity) {
                 blockers.push(slug);
                 reasons.push(`${slug}: security_posture ${conf.security_posture} < threshold ${minSecurity}`);
@@ -27628,7 +27709,7 @@ async function run() {
                 continue;
             }
             if (failOnCritical) {
-                const critical = (payload.known_failure_modes || []).filter(f => !f.resolved && f.severity === "critical");
+                const critical = unresolvedFailures.filter(f => f.severity === "critical");
                 if (critical.length > 0) {
                     blockers.push(slug);
                     reasons.push(`${slug}: ${critical.length} unresolved critical failure(s) — ` +
@@ -27637,6 +27718,50 @@ async function run() {
             }
         }
         core.setOutput("blocked-tools", JSON.stringify(blockers));
+        // ── Informational summary: surface what the network knows about each tool. ─────
+        // Print sorted by severity so high-impact items appear first.
+        const severityRank = { critical: 0, high: 1, medium: 2, low: 3 };
+        const slugsByImpact = Object.keys(findings).sort((a, b) => {
+            const worstA = findings[a].failures.length
+                ? Math.min(...findings[a].failures.map(f => severityRank[f.severity] ?? 4))
+                : 99;
+            const worstB = findings[b].failures.length
+                ? Math.min(...findings[b].failures.map(f => severityRank[f.severity] ?? 4))
+                : 99;
+            return worstA - worstB;
+        });
+        const summaryLines = [];
+        summaryLines.push("## nanmesh-check findings");
+        summaryLines.push(`Scanned **${tools.size}** tools from manifests; **${toolsWithData}** had network data.`);
+        summaryLines.push("");
+        summaryLines.push("| Tool | Reports | Known unresolved failures | Confidence (sec / integ) |");
+        summaryLines.push("|---|---|---|---|");
+        for (const slug of slugsByImpact) {
+            const f = findings[slug];
+            const failures = f.failures.length
+                ? f.failures.slice(0, 3).map(x => `\`${x.failure_type}\` (${x.severity})`).join(", ")
+                : "none";
+            const sec = f.conf?.security_posture ?? "—";
+            const integ = f.conf?.integration_success_rate ?? "—";
+            summaryLines.push(`| [${slug}](https://nanmesh.ai/entities/${slug}) | ${f.reports_count} | ${failures} | ${sec} / ${integ} |`);
+            // Also info-log per-tool finding for the workflow log
+            if (f.failures.length > 0) {
+                const worst = f.failures.slice().sort((a, b) => (severityRank[a.severity] ?? 4)
+                    - (severityRank[b.severity] ?? 4))[0];
+                if (worst.severity === "critical") {
+                    core.error(`${slug}: ${f.failures.length} unresolved failure(s), worst=critical (${worst.failure_type})`);
+                }
+                else if (worst.severity === "high" || worst.severity === "medium") {
+                    core.warning(`${slug}: ${f.failures.length} unresolved failure(s), worst=${worst.severity} (${worst.failure_type}). ` +
+                        `Not blocking (threshold=critical). See https://nanmesh.ai/entities/${slug}`);
+                }
+            }
+        }
+        // Write to GitHub Actions step summary for a nice rendering in the UI
+        if (process.env.GITHUB_STEP_SUMMARY) {
+            const fs = await Promise.resolve(/* import() */).then(__nccwpck_require__.t.bind(__nccwpck_require__, 1455, 23));
+            await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, summaryLines.join("\n") + "\n");
+        }
         if (blockers.length > 0) {
             core.setFailed(`nanmesh-check: ${blockers.length} tool(s) blocked deploy:\n  - ` +
                 reasons.join("\n  - ") +
@@ -27653,15 +27778,16 @@ async function run() {
                 const payload = await fetchAgentPayload(apiUrl, slug, taskTypeInput, stackArr);
                 if (!payload?.slug)
                     continue;
-                const ok = await submitExecutionReport(apiUrl, agentKey, agentId, 
-                // Note: payload doesn't include id; for Phase 5.2 scaffold we pass slug-as-id (Phase 6.1 fixes)
-                payload.slug, taskTypeInput, stackArr);
+                const ok = await submitExecutionReport(apiUrl, agentKey, agentId, payload.slug, taskTypeInput, stackArr);
                 if (ok)
                     submitted++;
             }
         }
         core.setOutput("reports-submitted", String(submitted));
-        core.info(`nanmesh-check passed. ${tools.size} tools verified. ${submitted} execution_reports submitted.`);
+        const totalWarnings = Object.values(findings).reduce((n, f) => n + f.failures.length, 0);
+        core.info(`nanmesh-check passed. ${tools.size} tools scanned, ${toolsWithData} with network data, ` +
+            `${totalWarnings} known unresolved failures surfaced (not blocking). ` +
+            `${submitted} execution_reports submitted.`);
     }
     catch (e) {
         const msg = e instanceof Error ? e.message : String(e);

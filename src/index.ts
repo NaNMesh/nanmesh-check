@@ -201,16 +201,34 @@ async function run() {
     const stackArr = Array.from(stack);
     const blockers: string[] = [];
     const reasons: string[] = [];
+    type Finding = { slug: string; severity: string; failure_type: string; resolved: boolean };
+    const findings: Record<string, { failures: Finding[]; reports_count: number; conf: ConfidenceDecomposition | null }> = {};
+    let toolsWithData = 0;
 
     for (const raw of tools) {
       const slug = toSlug(raw);
       if (!slug) continue;
       const payload = await fetchAgentPayload(apiUrl, slug, taskTypeInput, stackArr);
       if (!payload) continue;
+      toolsWithData++;
 
       const conf = payload.confidence_decomposition;
       const isSecurity = SECURITY_LIKE.has(slug);
+      const unresolvedFailures = (payload.known_failure_modes || []).filter(f => !f.resolved);
 
+      // Always collect findings for informational logging — even when not blocking.
+      findings[slug] = {
+        failures: unresolvedFailures.map(f => ({
+          slug,
+          severity: f.severity,
+          failure_type: f.failure_type,
+          resolved: f.resolved,
+        })),
+        reports_count: payload.network_evidence?.total_reports ?? 0,
+        conf: conf ?? null,
+      };
+
+      // Blocking checks
       if (isSecurity && conf && conf.security_posture !== null && conf.security_posture < minSecurity) {
         blockers.push(slug);
         reasons.push(`${slug}: security_posture ${conf.security_posture} < threshold ${minSecurity}`);
@@ -222,9 +240,7 @@ async function run() {
         continue;
       }
       if (failOnCritical) {
-        const critical = (payload.known_failure_modes || []).filter(
-          f => !f.resolved && f.severity === "critical"
-        );
+        const critical = unresolvedFailures.filter(f => f.severity === "critical");
         if (critical.length > 0) {
           blockers.push(slug);
           reasons.push(
@@ -236,6 +252,57 @@ async function run() {
     }
 
     core.setOutput("blocked-tools", JSON.stringify(blockers));
+
+    // ── Informational summary: surface what the network knows about each tool. ─────
+    // Print sorted by severity so high-impact items appear first.
+    const severityRank = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+    const slugsByImpact = Object.keys(findings).sort((a, b) => {
+      const worstA = findings[a].failures.length
+        ? Math.min(...findings[a].failures.map(f => severityRank[f.severity as keyof typeof severityRank] ?? 4))
+        : 99;
+      const worstB = findings[b].failures.length
+        ? Math.min(...findings[b].failures.map(f => severityRank[f.severity as keyof typeof severityRank] ?? 4))
+        : 99;
+      return worstA - worstB;
+    });
+
+    const summaryLines: string[] = [];
+    summaryLines.push("## nanmesh-check findings");
+    summaryLines.push(`Scanned **${tools.size}** tools from manifests; **${toolsWithData}** had network data.`);
+    summaryLines.push("");
+    summaryLines.push("| Tool | Reports | Known unresolved failures | Confidence (sec / integ) |");
+    summaryLines.push("|---|---|---|---|");
+
+    for (const slug of slugsByImpact) {
+      const f = findings[slug];
+      const failures = f.failures.length
+        ? f.failures.slice(0, 3).map(x => `\`${x.failure_type}\` (${x.severity})`).join(", ")
+        : "none";
+      const sec = f.conf?.security_posture ?? "—";
+      const integ = f.conf?.integration_success_rate ?? "—";
+      summaryLines.push(`| [${slug}](https://nanmesh.ai/entities/${slug}) | ${f.reports_count} | ${failures} | ${sec} / ${integ} |`);
+      // Also info-log per-tool finding for the workflow log
+      if (f.failures.length > 0) {
+        const worst = f.failures.slice().sort(
+          (a, b) => (severityRank[a.severity as keyof typeof severityRank] ?? 4)
+                  - (severityRank[b.severity as keyof typeof severityRank] ?? 4)
+        )[0];
+        if (worst.severity === "critical") {
+          core.error(`${slug}: ${f.failures.length} unresolved failure(s), worst=critical (${worst.failure_type})`);
+        } else if (worst.severity === "high" || worst.severity === "medium") {
+          core.warning(
+            `${slug}: ${f.failures.length} unresolved failure(s), worst=${worst.severity} (${worst.failure_type}). ` +
+            `Not blocking (threshold=critical). See https://nanmesh.ai/entities/${slug}`
+          );
+        }
+      }
+    }
+
+    // Write to GitHub Actions step summary for a nice rendering in the UI
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      const fs = await import("node:fs/promises");
+      await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, summaryLines.join("\n") + "\n");
+    }
 
     if (blockers.length > 0) {
       core.setFailed(
@@ -255,14 +322,18 @@ async function run() {
         const payload = await fetchAgentPayload(apiUrl, slug, taskTypeInput, stackArr);
         if (!payload?.slug) continue;
         const ok = await submitExecutionReport(apiUrl, agentKey, agentId,
-          // Note: payload doesn't include id; for Phase 5.2 scaffold we pass slug-as-id (Phase 6.1 fixes)
           payload.slug, taskTypeInput, stackArr);
         if (ok) submitted++;
       }
     }
     core.setOutput("reports-submitted", String(submitted));
 
-    core.info(`nanmesh-check passed. ${tools.size} tools verified. ${submitted} execution_reports submitted.`);
+    const totalWarnings = Object.values(findings).reduce((n, f) => n + f.failures.length, 0);
+    core.info(
+      `nanmesh-check passed. ${tools.size} tools scanned, ${toolsWithData} with network data, ` +
+      `${totalWarnings} known unresolved failures surfaced (not blocking). ` +
+      `${submitted} execution_reports submitted.`
+    );
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     core.setFailed(`nanmesh-check error: ${msg}`);
