@@ -38,7 +38,7 @@ inputs:
     required: false
     default: 'false'
   agent-key:
-    description: 'X-Agent-Key for submitting reports (required only if submit-execution-report=true). Use ${{ secrets.NANMESH_AGENT_KEY }}.'
+    description: 'X-Agent-Key for submitting reports (required only if submit-execution-report=true). In your workflow, pass secrets.NANMESH_AGENT_KEY here.'
     required: false
 
 outputs:
