@@ -27582,27 +27582,62 @@ function readManifests(globs) {
     return { tools, stack };
 }
 // Map a raw dependency name to a NaN Mesh entity slug.
-// Phase 5.2 minimal mapping; Phase 6.1 grows the table from real usage.
+// Phase 6.1 expansion. Add entries as real-repo demos surface new package names.
 const SLUG_MAP = {
+    // Auth
     "@clerk/nextjs": "clerk",
     "@clerk/clerk-sdk-node": "clerk",
-    "@supabase/supabase-js": "supabase",
-    "@supabase/auth-helpers-nextjs": "supabase",
-    "stripe": "stripe",
-    "next": "nextjs",
+    "@clerk/clerk-react": "clerk",
+    "@clerk/elements": "clerk",
     "auth0": "auth0",
     "@auth0/auth0-react": "auth0",
     "@auth0/nextjs-auth0": "auth0",
+    "@auth0/auth0-spa-js": "auth0",
+    // Databases
+    "@supabase/supabase-js": "supabase",
+    "@supabase/auth-helpers-nextjs": "supabase",
+    "@supabase/ssr": "supabase",
+    // Payments
+    "stripe": "stripe",
+    "@stripe/stripe-js": "stripe",
+    "@stripe/react-stripe-js": "stripe",
+    "plaid": "plaid",
+    // Frameworks
+    "next": "nextjs",
+    // AI SDKs
     "openai": "openai",
     "anthropic": "anthropic",
     "@anthropic-ai/sdk": "anthropic",
     "langchain": "langchain",
     "@langchain/core": "langchain",
+    "@langchain/openai": "langchain",
+    "@langchain/anthropic": "langchain",
+    "@langchain/community": "langchain",
     "crewai": "crewai",
+    // Email
     "resend": "resend",
+    // Cloud
     "@vercel/blob": "vercel",
+    // Comms
     "twilio": "twilio",
-    "plaid": "plaid",
+    // Analytics — amplitude is the entity slug; many JS/TS package variants map to it
+    "amplitude-js": "amplitude",
+    "@amplitude/analytics-browser": "amplitude",
+    "@amplitude/analytics-node": "amplitude",
+    "@amplitude/analytics-react-native": "amplitude",
+    "@amplitude/analytics-types": "amplitude",
+    "@amplitude/unified": "amplitude",
+    "amplitude-react-native": "amplitude",
+    // Other analytics commonly seen in agent stacks
+    "mixpanel-browser": "mixpanel",
+    "mixpanel": "mixpanel",
+    "posthog-js": "posthog",
+    "posthog-node": "posthog",
+    "@sentry/browser": "sentry",
+    "@sentry/node": "sentry",
+    "@sentry/nextjs": "sentry",
+    "@sentry/react": "sentry",
+    "@sentry/vue": "sentry",
 };
 function toSlug(rawName) {
     if (SLUG_MAP[rawName])
